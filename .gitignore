@@ -1,0 +1,42 @@
+# python stuff
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/
+.env
+
+# model weights and checkpoints
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+checkpoints/
+saved_models/
+
+# datasets
+data/
+datasets/
+coco/
+rlhf-v/
+
+# huggingface cache
+.cache/
+hf_cache/
+
+# logs and hpc outputs
+*.log
+*.out
+*.err
+runs/
+wandb/
+slurm-*.out
+
+# ide settings
+.vscode/
+.idea/
+*.ipynb_checkpoints/
+
+# system
+.DS_Store
