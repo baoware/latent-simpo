@@ -32,7 +32,7 @@ def main():
     # optimizer with differential learning rates
     # Predictor gets normal LR, Y-Encoder gets 0.05 * LR
     optimizer = optim.AdamW([
-        {'params': model.predictor_layers.parameters(), 'lr': cfg.lr_predictor},
+        {'params': filter(lambda p: p.requires_grad, model.predictor_model.parameters()), 'lr': cfg.lr_predictor},
         {'params': model.predictor_head.parameters(), 'lr': cfg.lr_predictor},
         {'params': model.y_encoder.parameters(), 'lr': cfg.lr_y_encoder},
         {'params': model.y_proj.parameters(), 'lr': cfg.lr_y_encoder}
@@ -42,7 +42,7 @@ def main():
     print("Loading dataset...")
     print("----------")
     dataset = COCODataset(cfg, split='train')
-    dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, shuffle=True, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, shuffle=True, num_workers=0)
 
     # training loop
     model.train()

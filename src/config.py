@@ -20,7 +20,7 @@ class Config:
     
     # architecture dimensions from paper
     x_encoder_dim: int = 1024   # ViT-L output dimension
-    predictor_dim: int = 2048   # Llama-1B hidden dimension
+    predictor_dim: int = 3072   # Phi-4-mini hidden dimension
     y_encoder_dim: int = 768    # EmbeddingGemma-300M
     target_dim: int = 1536      # shared embedding space
     
