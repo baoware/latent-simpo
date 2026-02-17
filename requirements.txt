@@ -21,3 +21,10 @@ pillow
 scikit-learn
 
 wandb
+
+huggingface_hub>=0.20.0
+h11
+
+dotenv
+
+pycocotools
