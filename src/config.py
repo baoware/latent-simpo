@@ -16,7 +16,7 @@ class Config:
     predictor_source: str = "microsoft/Phi-4-mini-instruct"
     
     # Y-Encoder: EmbeddingGemma-300M
-    y_encoder_source: str = "google/embeddinggemma-300m"
+    y_encoder_source = "google/embeddinggemma-300m"
     
     # architecture dimensions from paper
     x_encoder_dim: int = 1024   # ViT-L output dimension

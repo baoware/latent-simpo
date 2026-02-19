@@ -36,14 +36,17 @@ class VL_JEPA(nn.Module):
         self.predictor_model = AutoModel.from_pretrained(
             config.predictor_source, 
             trust_remote_code=True,
-            dtype=torch.float32 
+            dtype=torch.bfloat16
         )
+
+        self.predictor_model.gradient_checkpointing_enable()
+        self.predictor_model.config.use_cache = False
         
         # freeze model
         self.predictor_model.eval()
         for param in self.predictor_model.parameters():
             param.requires_grad = False
-            
+
         # unfreeze only the last n layers
         # standard HF structure: model.layers (Llama/Mistral/Qwen/Phi)
         # need to find where the layers list is
@@ -86,14 +89,40 @@ class VL_JEPA(nn.Module):
         self.y_proj = nn.Linear(y_dim, config.target_dim)
 
     def forward_predictor(self, video_pixel_values, query_ids):
+        if video_pixel_values.ndim != 5:
+            raise ValueError(f"Expected 5D video tensor, got shape {video_pixel_values.shape}")
+
+        shape = video_pixel_values.shape
+
+        # detect format
+        if shape[-1] == 3:
+            # [B,T,H,W,C] permute to [B,T,C,H,W]
+            B, T, H, W, C = shape
+            frames = video_pixel_values.permute(0, 1, 4, 2, 3).contiguous()
+        elif shape[2] == 3:
+            # [B,T,C,H,W]
+            B, T, C, H, W = shape
+            frames = video_pixel_values
+        elif shape[1] == 3:
+            # [B,C,T,H,W] permute to [B,T,C,H,W]
+            B, C, T, H, W = shape
+            frames = video_pixel_values.permute(0, 2, 1, 3, 4).contiguous()
+        else:
+            raise ValueError(f"Cannot detect channel dimension in video tensor: {video_pixel_values.shape}")
+
+        # flatten time into batch
+        frames = frames.view(B * T, C, H, W)
+        # print(f"frames.shape for ViT: {frames.shape}")  # [B*T, 3, H, W]
+
         # X-Encoder
         with torch.no_grad():
-            b, c, t, h, w = video_pixel_values.shape
-            images = video_pixel_values.permute(0, 2, 1, 3, 4).reshape(b * t, c, h, w)
-            features = self.x_encoder.forward_features(images)
-            if len(features.shape) == 2: features = features.unsqueeze(1)
-            _, n_tok, dim = features.shape
-            x_features = features.view(b, t * n_tok, dim)
+            features = self.x_encoder.forward_features(frames)
+
+            # keep only cls token
+            cls_tokens = features[:, 0, :]            # [B*T, dim]
+            cls_tokens = cls_tokens.view(B, T, -1)    # [B, T, dim]
+
+            x_features = cls_tokens
         
         # embed
         x_embeds = self.x_proj(x_features)
@@ -108,7 +137,6 @@ class VL_JEPA(nn.Module):
         # pass 'inputs_embeds' directly
         outputs = self.predictor_model(
             inputs_embeds=inputs_embeds,
-            output_hidden_states=True
         )
         
         # get last hidden state

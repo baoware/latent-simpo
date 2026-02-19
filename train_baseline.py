@@ -60,12 +60,13 @@ def main():
             
             optimizer.zero_grad()
             
-            # forward pass to get embeddings
-            pred_emb = model.forward_predictor(video, q_ids)
-            target_emb = model.forward_y_encoder(t_ids, t_mask)
-            
-            # InfoNCE loss
-            loss = infonce_loss(pred_emb, target_emb, temperature=cfg.temperature)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                # forward pass to get embeddings
+                pred_emb = model.forward_predictor(video, q_ids)
+                target_emb = model.forward_y_encoder(t_ids, t_mask)
+                
+                # InfoNCE loss
+                loss = infonce_loss(pred_emb, target_emb, temperature=cfg.temperature)
             
             # backward and step
             loss.backward()
