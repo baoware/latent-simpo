@@ -127,6 +127,9 @@ class VL_JEPA(nn.Module):
         # embed
         x_embeds = self.x_proj(x_features)
         query_embeds = self.predictor_embed(query_ids)
+
+        if x_embeds.dtype != query_embeds.dtype:
+            x_embeds = x_embeds.to(query_embeds.dtype)
         
         # concatenate
         # [Batch, Seq_Len, Dim]
@@ -144,10 +147,14 @@ class VL_JEPA(nn.Module):
         
         # pooling and projection
         # simple mean pool over the sequence
-        pooled = torch.mean(hidden_states, dim=1)
+        pooled = torch.mean(hidden_states, dim=1).to(dtype=torch.float32)
+
+        if pooled.dtype != self.predictor_head.weight.dtype:
+             pooled = pooled.to(self.predictor_head.weight.dtype)
+
         pred_emb = self.predictor_head(pooled)
 
-        return F.normalize(pred_emb, p=2, dim=-1)
+        return F.normalize(pred_emb.float(), p=2, dim=-1)
 
     def forward_y_encoder(self, input_ids, attention_mask):
         # same as before
@@ -161,5 +168,10 @@ class VL_JEPA(nn.Module):
         sum_embeddings = torch.sum(last_hidden * mask_expanded, 1)
         sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)
         pooled = sum_embeddings / sum_mask
-        target_emb = self.y_proj(pooled.to(dtype=torch.float32))
-        return F.normalize(target_emb, p=2, dim=-1)
+
+        if pooled.dtype != self.y_proj.weight.dtype:
+            pooled = pooled.to(self.y_proj.weight.dtype)
+            
+        target_emb = self.y_proj(pooled)
+        
+        return F.normalize(target_emb.float(), p=2, dim=-1)

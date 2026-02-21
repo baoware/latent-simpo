@@ -13,6 +13,7 @@ from src.losses import infonce_loss
 from dotenv import load_dotenv
 import huggingface_hub
 
+load_dotenv() 
 token = os.getenv("HF_TOKEN")
 huggingface_hub.login(token=token)
 
