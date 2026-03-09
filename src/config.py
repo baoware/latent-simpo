@@ -9,18 +9,19 @@ class Config:
     
     # vl-jepa architecture components from paper
     # X-Encoder: V-JEPA 2 ViT-L
-    x_encoder_source: str = "vit_large" 
+    # x_encoder_source: str = "vit_large" 
+    x_encoder_source: str = "facebook/vjepa2-vitl-fpc64-256" 
     
     # Predictor: Llama-3.2-1B (once accessible)
-    # predictor_source: str = "meta-llama/Llama-3.2-1B"
-    predictor_source: str = "microsoft/Phi-4-mini-instruct"
+    predictor_source: str = "meta-llama/Llama-3.2-1B"
+    # predictor_source: str = "microsoft/Phi-4-mini-instruct"
     
     # Y-Encoder: EmbeddingGemma-300M
     y_encoder_source = "google/embeddinggemma-300m"
     
     # architecture dimensions from paper
     x_encoder_dim: int = 1024   # ViT-L output dimension
-    predictor_dim: int = 3072   # Phi-4-mini hidden dimension
+    predictor_dim: int = 2048   # Llama-3.2-1B or Phi-4-mini hidden dimension
     y_encoder_dim: int = 768    # EmbeddingGemma-300M
     target_dim: int = 1536      # shared embedding space
     
@@ -28,17 +29,18 @@ class Config:
     num_predictor_layers: int = 8  # last 8 transformer layers
     
     # datasets
-    # options: 'coco', 'cc3m', 'datacomp'
-    dataset_name: str = 'coco' 
+    # options: 'coco', 'datacomp'
+    # dataset_name: str = 'coco' 
+    dataset_name: str = 'datacomp' 
 
     # input specifications
-    num_frames: int = 16        
-    resolution: int = 224       
+    num_frames: int = 2
+    resolution: int = 256      
     max_seq_len: int = 64       # short for pre-training but normally 512 query tokens
     
     # baseline training
-    batch_size: int = 64
-    batch_size_base: int = 16
+    batch_size: int = 256
+    batch_size_base: int = 32
     epochs_base: int = 2
     
     # learning rates 
