@@ -26,7 +26,7 @@ class BaseJEPADataset(Dataset):
             T.ToTensor(),
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-
+    
     def prepare_video(self, image):
         if image.mode != "RGB":
             image = image.convert("RGB")
@@ -37,6 +37,7 @@ class BaseJEPADataset(Dataset):
     def prepare_text(self, text, tokenizer, max_len):
         return tokenizer(text, return_tensors='pt', padding='max_length', 
                          max_length=max_len, truncation=True)
+
 
 class COCODataset(BaseJEPADataset):
     def __init__(self, config, split='train'):
@@ -84,6 +85,7 @@ class COCODataset(BaseJEPADataset):
             "t_ids": t_tok.input_ids.squeeze(0),
             "t_mask": t_tok.attention_mask.squeeze(0)
         }
+
 
 class DataCompDataset(IterableDataset):
     def __init__(self, config):

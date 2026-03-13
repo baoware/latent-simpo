@@ -46,29 +46,18 @@ class VL_JEPA(nn.Module):
         for param in self.predictor_model.parameters():
             param.requires_grad = False
 
-        # unfreeze only the last n layers
-        # standard HF structure: model.layers (Llama/Mistral/Qwen/Phi)
-        # need to find where the layers list is
         if hasattr(self.predictor_model, "layers"):
-            layers = self.predictor_model.layers
-        elif hasattr(self.predictor_model, "model"):
-            layers = self.predictor_model.model.layers
+            layer_list = self.predictor_model.layers
+            self.predictor_model.layers = nn.ModuleList(layer_list[-config.num_predictor_layers:])
+        elif hasattr(self.predictor_model, "model") and hasattr(self.predictor_model.model, "layers"):
+            layer_list = self.predictor_model.model.layers
+            self.predictor_model.model.layers = nn.ModuleList(layer_list[-config.num_predictor_layers:])
         else:
-            raise AttributeError("Could not find layers in Predictor")
-
-        # enable gradients for the last n layers
-        for i in range(len(layers) - config.num_predictor_layers, len(layers)):
-            print(f"Unfreezing Predictor Layer {i}")
-            for param in layers[i].parameters():
-                param.requires_grad = True
+            raise AttributeError("Could not find layers to truncate.")
         
-        # unfreeze the final norm
-        if hasattr(self.predictor_model, "norm"):
-            for p in self.predictor_model.norm.parameters(): p.requires_grad = True
-        elif hasattr(self.predictor_model, "model") and hasattr(self.predictor_model.model, "norm"):
-             for p in self.predictor_model.model.norm.parameters(): p.requires_grad = True
+        for param in self.predictor_model.parameters():
+            param.requires_grad = True
 
-        
         # need access to the embedding layer for the forward pass
         self.predictor_embed = self.predictor_model.get_input_embeddings()
 
@@ -78,21 +67,33 @@ class VL_JEPA(nn.Module):
         # text targets Y-Encoder
         print(f"Initializing Y-Encoder from {config.y_encoder_source}...")
         print("----------")
+
         self.y_encoder = AutoModel.from_pretrained(
             config.y_encoder_source,
             dtype=torch.bfloat16,
             trust_remote_code=True
         )
+
         y_dim = getattr(self.y_encoder.config, "hidden_size", 0)
         if y_dim == 0: y_dim = getattr(self.y_encoder.config, "d_model", 768)
         self.y_proj = nn.Linear(y_dim, config.target_dim)
 
     def forward_predictor(self, video_pixel_values, query_ids):
+        # for eval only, not for training on datacomp
+        # video_pixel_values = video_pixel_values.permute(0, 2, 1, 3, 4) 
+        
         # X-Encoder
         with torch.no_grad():
             # video_pixel_values is [B, T, C, H, W]
             x_features = self.x_encoder.get_vision_features(video_pixel_values)
             # x_features shape: [B, N_Tokens, Dim]
+
+        max_vis_tokens = 256 # limit to 1 image equivalent
+        current_tokens = x_features.shape[1]
+        
+        if current_tokens > max_vis_tokens:
+            stride = current_tokens // max_vis_tokens
+            x_features = x_features[:, ::stride, :][:, :max_vis_tokens, :]
         
         # embed
         x_embeds = self.x_proj(x_features)

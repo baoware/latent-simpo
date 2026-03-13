@@ -47,7 +47,7 @@ def main():
     print("----------")
     if cfg.dataset_name == 'datacomp':
         dataset = DataCompDataset(cfg)
-        dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=4)
+        dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=0)
         total_steps = (12800000 // cfg.batch_size_base) // accelerator.num_processes
     else:
         dataset = COCODataset(cfg, split='train')

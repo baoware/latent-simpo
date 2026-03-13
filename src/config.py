@@ -39,9 +39,9 @@ class Config:
     max_seq_len: int = 64       # short for pre-training but normally 512 query tokens
     
     # baseline training
-    batch_size: int = 256
-    batch_size_base: int = 32
-    epochs_base: int = 2
+    batch_size: int = 1024
+    batch_size_base: int = 512
+    epochs_base: int = 1
     
     # learning rates 
     # vl-jepa paper: "setting a learning rate multiplier of ×0.05 to all text encoder parameters improves performance"

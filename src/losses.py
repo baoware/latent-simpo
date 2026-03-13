@@ -36,3 +36,39 @@ def infonce_loss(pred_embeddings, target_embeddings, temperature=0.07):
     # cross entropy: softmax + log-likelihood.
     # tries to maximize the diagonal values (positive pairs) and minimize off-diagonal values (random negatives)
     return F.cross_entropy(logits, labels)
+
+
+"""
+    calculates the latent simple preference optimization
+    
+    goal: force predicted embedding to be closer to the 'winner' (safe/factual)
+    than the 'loser' (unsafe/hallucinated) by a specific margin
+    
+    inputs:
+        pred_embeddings:    [Batch_Size, Dim] (the model's actual prediction)
+        win_embeddings:     [Batch_Size, Dim] (target embedding for the 'chosen' text)
+        lose_embeddings:    [Batch_Size, Dim] (target embedding for the 'rejected' text)
+        beta:     scalar reward scale (temperature inverse)
+        gamma:    scalar target margin (the 'safety buffer')
+    
+    outputs:
+        scalar loss value
+"""
+def latent_simpo_loss(pred_emb, win_emb, lose_emb, beta=10.0, gamma=0.2):
+    
+    # normalize everything
+    pred_norm = F.normalize(pred_emb, p=2, dim=-1)
+    win_norm = F.normalize(win_emb, p=2, dim=-1)
+    lose_norm = F.normalize(lose_emb, p=2, dim=-1)
+
+    # calculate cosine similarities
+    sim_win = torch.sum(pred_norm * win_norm, dim=-1)
+    sim_lose = torch.sum(pred_norm * lose_norm, dim=-1)
+
+    # compute margin: (win - lose) - gamma
+    margin = sim_win - sim_lose - gamma
+    
+    # log-sigmoid loss
+    loss = -F.logsigmoid(beta * margin)
+    
+    return loss.mean()
