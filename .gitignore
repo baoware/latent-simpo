@@ -40,3 +40,6 @@ slurm-*.out
 
 # system
 .DS_Store
+
+# jepa repo
+jepa/
