@@ -52,15 +52,15 @@ class Config:
 
     # alignment hyperparams
     max_seq_len_aligment: int = 512  
-    batch_size_alignment: int = 16
+    batch_size_alignment: int = 64
     epochs_alignment: int = 3
-    lr_alignment: float = 1e-5
-    lr_y_encoder_alignment: float = 5e-7  # (1e-5 * 0.05)
+    lr_alignment: float = 5e-5
+    lr_y_encoder_alignment: float = 2.5e-6  # (1e-5 * 0.05)
     
     # latent-simpo and triplet loss hyperparams
     beta: float = 10.0          # reward scale
     gamma: float = 0.2          # target margin 
-    lambda_reg: float = 0.1     # stability regularization 
+    lambda_reg: float = 0.01    # stability regularization 
     
     # system
     device: str = "cuda" if torch.cuda.is_available() else "cpu"

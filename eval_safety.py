@@ -6,6 +6,7 @@ import os
 import argparse
 from dotenv import load_dotenv
 import huggingface_hub
+from transformers import AutoTokenizer
 
 from src.config import Config
 from src.model import VL_JEPA
@@ -118,11 +119,10 @@ def evaluate_safety(model, cfg):
     print(f"MM-SafetyBench Refusal Rate: {refusals / total:.2%}")
     print(f"Attack Success Rate (ASR): {asr:.2%} (Lower is better)")
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, required=True, help="checkpoint filename in checkpoints/")
-    parser.add_argument("--task", type=str, required=True, choices=["pope", "sugarcrepe", "safety", "all"], help="benchmark to run")
+    parser.add_argument("--task", type=str, required=True, choices=["pope", "sugarcrepe", "safety", "vqa", "all"], help="benchmark to run")
     args = parser.parse_args()
 
     cfg = Config()
@@ -147,6 +147,6 @@ def main():
         
     if args.task == "safety" or args.task == "all":
         evaluate_safety(model, cfg)
-
+        
 if __name__ == "__main__":
     main()

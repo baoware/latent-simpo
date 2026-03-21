@@ -371,3 +371,172 @@ class MMSafetyDataset(BaseJEPADataset):
             "unsafe_ids": unsafe_tok.input_ids.squeeze(0),
             "unsafe_mask": unsafe_tok.attention_mask.squeeze(0)
         }
+
+class SafeVLDataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading SPA-VL Dataset (Multimodal Safety) ({split})...")
+
+        self.dataset = load_dataset("sqrti/SPA-VL", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # vision input
+        video = self.prepare_video(item['image'])
+        
+        # query
+        question = item.get('question', '')
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # targets
+        chosen = item.get('chosen', '')
+        rejected = item.get('rejected', '')
+            
+        win_text = f"task: sentence similarity | query: {chosen}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        lose_text = f"task: sentence similarity | query: {rejected}"
+        lose_tok = self.prepare_text(lose_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            "lose_ids": lose_tok.input_ids.squeeze(0),
+            "lose_mask": lose_tok.attention_mask.squeeze(0)
+        }
+
+class SafeRLHFDataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading PKU-SafeRLHF Dataset ({split})...")
+        # standard safety preference dataset
+        self.dataset = load_dataset("PKU-Alignment/PKU-SafeRLHF", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # vision input is dummy black image since this is text-only
+        dummy_img = Image.new('RGB', (self.config.resolution, self.config.resolution), (0, 0, 0))
+        video = self.prepare_video(dummy_img)
+        
+        # query
+        question = item.get('prompt', '')
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # targets
+        safer_id = item.get('safer_response_id', 0)
+        
+        if safer_id == 0:
+            chosen = item['response_0']
+            rejected = item['response_1']
+        else:
+            chosen = item['response_1']
+            rejected = item['response_0']
+            
+        win_text = f"task: sentence similarity | query: {chosen}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        lose_text = f"task: sentence similarity | query: {rejected}"
+        lose_tok = self.prepare_text(lose_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            
+            # Winner
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            
+            # Loser
+            "lose_ids": lose_tok.input_ids.squeeze(0),
+            "lose_mask": lose_tok.attention_mask.squeeze(0)
+        }
+
+
+class VQADataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading VQA Dataset (HuggingFaceH4/llava-instruct-mix-vsft)...")
+        
+        # Pure Parquet, fully cleaned by the Hugging Face H4 team. 
+        # Contains ~150k high-quality multimodal instructions.
+        self.dataset = load_dataset("HuggingFaceH4/llava-instruct-mix-vsft", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # 1. Vision Input
+        # H4 format includes the PIL images directly in a list
+        try:
+            image = item['images'][0]
+            video = self.prepare_video(image)
+        except Exception:
+            # Fallback for missing or corrupted images
+            from PIL import Image
+            image = Image.new('RGB', (224, 224), (0, 0, 0))
+            video = self.prepare_video(image)
+            
+        # 2. Extract Question and Answer
+        # H4 uses the standard OpenAI conversational format: 
+        #[{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+        messages = item.get('messages',[])
+        question = "Describe this image."
+        answer = ""
+        
+        if len(messages) >= 2:
+            # Extract raw text, handling lists if they use complex multimodal formatting
+            q_content = messages[0].get('content', '')
+            if isinstance(q_content, list):
+                q_content = " ".join([c['text'] for c in q_content if c['type'] == 'text'])
+            elif not isinstance(q_content, str):
+                q_content = str(q_content)
+            
+            a_content = messages[1].get('content', '')
+            if isinstance(a_content, list):
+                a_content = " ".join([c['text'] for c in a_content if c['type'] == 'text'])
+            elif not isinstance(a_content, str):
+                a_content = str(a_content)
+                
+            # Strip out the "<image>" placeholder tokens and clean up whitespace
+            question = q_content.replace("<image>", "").replace("\n", " ").strip()
+            answer = a_content.strip()
+            
+        # Fallback if the parsing resulted in an empty string
+        if not question:
+            question = "Describe this image."
+        
+        # 3. Query Input
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # 4. Target Input (Winner)
+        win_text = f"task: sentence similarity | query: {answer}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        # 5. Dummy Loser 
+        # VQA doesn't have losers, so we pass the winner twice. 
+        # The masking logic in train_alignment.py ignores the loser for VQA batches.
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            
+            "lose_ids": win_tok.input_ids.squeeze(0), 
+            "lose_mask": win_tok.attention_mask.squeeze(0) 
+        }

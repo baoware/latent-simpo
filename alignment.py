@@ -65,10 +65,16 @@ def main():
     if accelerator.is_main_process: 
         print("Loading RLHF-V Dataset...")
         print("----------")
+
     dataset = RLHFDataset(cfg, split='train')
     dataloader = DataLoader(dataset, batch_size=cfg.batch_size_alignment, shuffle=True, num_workers=4)
-    total_steps = len(dataloader) // accelerator.num_processes
 
+    # prepare with accelerate
+    model, optimizer, dataloader = accelerator.prepare(
+        model, optimizer, dataloader
+    )
+
+    total_steps = len(dataloader)
     num_training_steps = total_steps * cfg.epochs_alignment
     num_warmup_steps = int(0.1 * num_training_steps)
 
@@ -78,10 +84,7 @@ def main():
         num_training_steps=num_training_steps
     )
 
-    # prepare with accelerate
-    model, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, dataloader, lr_scheduler
-    )
+    lr_scheduler = accelerator.prepare(lr_scheduler)
 
     # training loop
     model.train()

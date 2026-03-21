@@ -7,7 +7,6 @@
 #SBATCH --mem=160GB                
 #SBATCH --time=48:00:00            
 #SBATCH --output=train_base_%j.log
-#SBATCH --account=uva-mira 
 
 cd /scratch/rjr6zk/latent-simpo/
 
