@@ -26,13 +26,22 @@ def main():
     parser.add_argument("--loss_type", type=str, required=True, choices=["infonce", "latent-simpo", "triplet-margin"])
     parser.add_argument("--load_from", type=str, required=True, help="Path to Phase 1 baseline")
     parser.add_argument("--save_name", type=str, required=True, help="Name of output checkpoint")
+    
+    parser.add_argument("--beta", type=float, default=10.0, help="Reward scale (SimPO)")
+    parser.add_argument("--gamma", type=float, default=0.2, help="Target margin")
+    parser.add_argument("--lambda_reg", type=float, default=0.1, help="InfoNCE Regularization weight")
     args = parser.parse_args()
 
     accelerator = Accelerator(mixed_precision="bf16")
     cfg = Config()
     
+    cfg.beta = args.beta
+    cfg.gamma = args.gamma
+    cfg.lambda_reg = args.lambda_reg
+    
     if accelerator.is_main_process:
         print(f"Comprehensive Alignment | Loss: {args.loss_type.upper()} | GPUs: {accelerator.num_processes}")
+        print(f"Beta: {cfg.beta} | Gamma: {cfg.gamma} | Lambda: {cfg.lambda_reg}")
         print("----------")
         if not os.path.exists(cfg.output_dir): os.makedirs(cfg.output_dir)
 

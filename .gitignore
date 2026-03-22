@@ -32,6 +32,8 @@ hf_cache/
 runs/
 wandb/
 slurm-*.out
+logs/
+slurm_scripts/
 
 # ide settings
 .vscode/

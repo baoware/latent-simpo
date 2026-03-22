@@ -13,6 +13,16 @@ source .venv/bin/activate
 pip install --quiet -r requirements.txt
 
 accelerate launch --multi_gpu --num_processes=2 comp_alignment.py \
+    --loss_type infonce \
+    --load_from checkpoints/datacomp_baseline_epoch_1.pt \
+    --save_name rlhf_infonce_comprehensive.pt
+
+accelerate launch --multi_gpu --num_processes=2 comp_alignment.py \
+    --loss_type latent-simpo \
+    --load_from checkpoints/datacomp_baseline_epoch_1.pt \
+    --save_name rlhf_latent_simpo_comprehensive.pt
+
+accelerate launch --multi_gpu --num_processes=2 comp_alignment.py \
     --loss_type triplet-margin \
     --load_from checkpoints/datacomp_baseline_epoch_1.pt \
-    --save_name rlhf_triplet_margin_comprehensive_3.pt
+    --save_name rlhf_triplet_margin_comprehensive.pt  
