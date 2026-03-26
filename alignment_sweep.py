@@ -30,18 +30,20 @@ for loss in LOSS_TYPES:
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=80GB
-#SBATCH --time=6:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=logs/{exp_name}_%j.log
 #SBATCH --account=cs6770_sp26
 
 
-cd /scratch/rjr6zk/latent-simpo/
+cd /sfs/weka/scratch/rjr6zk/latent-simpo/
 source .venv/bin/activate
 pip install --quiet -r requirements.txt
 
+mkdir -p logs/evals
+
 echo "Running Sweep: {exp_name}"
 
-accelerate launch --multi_gpu --num_processes=2 train_alignment.py \\
+python comp_alignment.py \\
     --loss_type {loss} \\
     --load_from {base_checkpoint} \\
     --save_name {save_name} \\
