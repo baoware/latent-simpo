@@ -4,10 +4,12 @@ import glob
 import random
 from torchvision.datasets import CocoCaptions
 from torch.utils.data import Dataset, IterableDataset
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from transformers import AutoTokenizer
 import torchvision.transforms as T
 import webdataset as wds
+import json
+from PIL import Image
 
 
 class BaseJEPADataset(Dataset):
@@ -106,6 +108,7 @@ class DataCompDataset(IterableDataset):
         ])
         
         print("Initializing DataComp-Small (WebDataset Stream)...")
+        print("----------")
         
         current_file_dir = os.path.dirname(os.path.abspath(__file__)) # .../latent-simpo/src
         project_root = os.path.dirname(current_file_dir)              # .../latent-simpo
@@ -174,3 +177,366 @@ class DataCompDataset(IterableDataset):
             except Exception as e:
                 print(f"Data error: {e}")
                 continue
+
+class RLHFDataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading RLHF-V Dataset ({split})...")
+        print("----------")
+        
+        # use official rlhf-v dataset from huggingface
+        # it contains 'image', 'question', 'chosen', and 'rejected' columns
+        self.dataset = load_dataset("openbmb/RLHF-V-Dataset", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # vision input (uses inherited prepare_video to get [T, C, H, W])
+        video = self.prepare_video(item['image'])
+
+        text_data = item.get('text', {})
+        
+        if isinstance(text_data, str):
+            try:
+                text_data = json.loads(text_data)
+            except Exception:
+                text_data = {'question': 'Describe this image.', 'chosen': text_data, 'rejected': ''}
+                
+        # extract the fields safely
+        question = text_data.get('question', 'Describe this image.')
+        chosen_text = text_data.get('chosen', '')
+        rejected_text = text_data.get('rejected', '')
+        
+        # query input (the user question)
+        # wrap the question in a simple instruction format
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # winner (chosen)
+        # requires embeddinggemma task prefix to generate valid semantic embeddings
+        win_text = f"task: sentence similarity | query: {chosen_text}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        # loser (rejected)
+        lose_text = f"task: sentence similarity | query: {rejected_text}"
+        lose_tok = self.prepare_text(lose_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            
+            # winner
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            
+            # loser
+            "lose_ids": lose_tok.input_ids.squeeze(0),
+            "lose_mask": lose_tok.attention_mask.squeeze(0)
+        }
+
+class POPEDataset(BaseJEPADataset):
+    def __init__(self, config, split='test'):
+        super().__init__(config)
+        print("Initializing POPE Dataset...")
+        print("----------")
+        # standard huggingface repo for POPE
+        self.dataset = load_dataset("lmms-lab/POPE", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        video = self.prepare_video(item['image'])
+        
+        question = item.get('question', '')
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 32)
+        
+        # pope is binary: yes or no
+        yes_text = "task: sentence similarity | query: Yes."
+        no_text = "task: sentence similarity | query: No."
+        
+        yes_tok = self.prepare_text(yes_text, self.y_encoder_tokenizer, 16)
+        no_tok = self.prepare_text(no_text, self.y_encoder_tokenizer, 16)
+        
+        # label: 1 if "yes" is correct, 0 if "no" is correct
+        label = 1 if item.get('label', '').lower() == 'yes' else 0
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            "yes_ids": yes_tok.input_ids.squeeze(0),
+            "yes_mask": yes_tok.attention_mask.squeeze(0),
+            "no_ids": no_tok.input_ids.squeeze(0),
+            "no_mask": no_tok.attention_mask.squeeze(0),
+            "label": label
+        }
+
+class SugarCrepeDataset(BaseJEPADataset):
+    def __init__(self, config, subset='replace_attribute', split='train'):
+        super().__init__(config)
+        print(f"Initializing SugarCrepe++ Dataset ({subset})...")
+        print("----------")
+        
+        self.dataset = load_dataset("Aman-J/SugarCrepe_pp", subset, split=split)
+        
+        self.img_dir = os.path.join(config.data_dir, "coco", "val2017")
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # load image from local disk
+        img_path = os.path.join(self.img_dir, item['filename'])
+        try:
+            image = Image.open(img_path).convert('RGB')
+        except FileNotFoundError:
+            # fallback if image isn't found (skip or return dummy)
+            print(f"Missing image: {img_path}")
+            image = Image.new('RGB', (224, 224), (0, 0, 0))
+            
+        video = self.prepare_video(image)
+        
+        # prompts and targets
+        q_tok = self.prepare_text("Describe this image:", self.predictor_tokenizer, 16)
+        
+        pos_text = f"task: sentence similarity | query: {item['caption']}"
+        neg_text = f"task: sentence similarity | query: {item['negative_caption']}"
+        
+        pos_tok = self.prepare_text(pos_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        neg_tok = self.prepare_text(neg_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            "pos_ids": pos_tok.input_ids.squeeze(0),
+            "pos_mask": pos_tok.attention_mask.squeeze(0),
+            "neg_ids": neg_tok.input_ids.squeeze(0),
+            "neg_mask": neg_tok.attention_mask.squeeze(0)
+        }
+
+class MMSafetyDataset(BaseJEPADataset):
+    def __init__(self, config, subsets=None, split='SD'):
+        super().__init__(config)
+        
+        # default to the most relevant physical-world categories for VL-JEPA
+        if subsets is None:
+            subsets =['Illegal_Activitiy', 'Physical_Harm', 'Health_Consultation']
+            
+        print(f"Initializing MM-SafetyBench Dataset (Categories: {subsets})...")
+        
+        # MM-SafetyBench uses 'SD' as the split name for its image dataset
+        actual_split = 'SD' if split in['test', 'val', 'validation'] else split
+        
+        # load and concatenate the subsets
+        dataset_list =[]
+        for subset in subsets:
+            print(f"  Loading subset: {subset}...")
+            ds = load_dataset("PKU-Alignment/MM-SafetyBench", subset, split=actual_split)
+            dataset_list.append(ds)
+            
+        # merge them into a single dataset
+        self.dataset = concatenate_datasets(dataset_list)
+        print(f"Total concatenated safety samples: {len(self.dataset)}")
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        video = self.prepare_video(item['image'])
+        
+        question = item.get('question', '')
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # discriminative safety evaluation
+        safe_text = "task: sentence similarity | query: I cannot fulfill this request."
+        unsafe_text = "task: sentence similarity | query: Sure, here is how to do that."
+        
+        safe_tok = self.prepare_text(safe_text, self.y_encoder_tokenizer, 32)
+        unsafe_tok = self.prepare_text(unsafe_text, self.y_encoder_tokenizer, 32)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            "safe_ids": safe_tok.input_ids.squeeze(0),
+            "safe_mask": safe_tok.attention_mask.squeeze(0),
+            "unsafe_ids": unsafe_tok.input_ids.squeeze(0),
+            "unsafe_mask": unsafe_tok.attention_mask.squeeze(0)
+        }
+
+class SafeVLDataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading SPA-VL Dataset (Multimodal Safety) ({split})...")
+
+        self.dataset = load_dataset("sqrti/SPA-VL", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # vision input
+        video = self.prepare_video(item['image'])
+        
+        # query
+        question = item.get('question', '')
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # targets
+        chosen = item.get('chosen', '')
+        rejected = item.get('rejected', '')
+            
+        win_text = f"task: sentence similarity | query: {chosen}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        lose_text = f"task: sentence similarity | query: {rejected}"
+        lose_tok = self.prepare_text(lose_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            "lose_ids": lose_tok.input_ids.squeeze(0),
+            "lose_mask": lose_tok.attention_mask.squeeze(0)
+        }
+
+class SafeRLHFDataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading PKU-SafeRLHF Dataset ({split})...")
+        # standard safety preference dataset
+        self.dataset = load_dataset("PKU-Alignment/PKU-SafeRLHF", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # vision input is dummy black image since this is text-only
+        dummy_img = Image.new('RGB', (self.config.resolution, self.config.resolution), (0, 0, 0))
+        video = self.prepare_video(dummy_img)
+        
+        # query
+        question = item.get('prompt', '')
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # targets
+        safer_id = item.get('safer_response_id', 0)
+        
+        if safer_id == 0:
+            chosen = item['response_0']
+            rejected = item['response_1']
+        else:
+            chosen = item['response_1']
+            rejected = item['response_0']
+            
+        win_text = f"task: sentence similarity | query: {chosen}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        lose_text = f"task: sentence similarity | query: {rejected}"
+        lose_tok = self.prepare_text(lose_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            
+            # Winner
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            
+            # Loser
+            "lose_ids": lose_tok.input_ids.squeeze(0),
+            "lose_mask": lose_tok.attention_mask.squeeze(0)
+        }
+
+
+class VQADataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading VQA Dataset (HuggingFaceH4/llava-instruct-mix-vsft)...")
+        
+        # Pure Parquet, fully cleaned by the Hugging Face H4 team. 
+        # Contains ~150k high-quality multimodal instructions.
+        self.dataset = load_dataset("HuggingFaceH4/llava-instruct-mix-vsft", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        # 1. Vision Input
+        # H4 format includes the PIL images directly in a list
+        try:
+            image = item['images'][0]
+            video = self.prepare_video(image)
+        except Exception:
+            # Fallback for missing or corrupted images
+            from PIL import Image
+            image = Image.new('RGB', (224, 224), (0, 0, 0))
+            video = self.prepare_video(image)
+            
+        # 2. Extract Question and Answer
+        # H4 uses the standard OpenAI conversational format: 
+        #[{'role': 'user', 'content': '...'}, {'role': 'assistant', 'content': '...'}]
+        messages = item.get('messages',[])
+        question = "Describe this image."
+        answer = ""
+        
+        if len(messages) >= 2:
+            # Extract raw text, handling lists if they use complex multimodal formatting
+            q_content = messages[0].get('content', '')
+            if isinstance(q_content, list):
+                q_content = " ".join([c['text'] for c in q_content if c['type'] == 'text'])
+            elif not isinstance(q_content, str):
+                q_content = str(q_content)
+            
+            a_content = messages[1].get('content', '')
+            if isinstance(a_content, list):
+                a_content = " ".join([c['text'] for c in a_content if c['type'] == 'text'])
+            elif not isinstance(a_content, str):
+                a_content = str(a_content)
+                
+            # Strip out the "<image>" placeholder tokens and clean up whitespace
+            question = q_content.replace("<image>", "").replace("\n", " ").strip()
+            answer = a_content.strip()
+            
+        # Fallback if the parsing resulted in an empty string
+        if not question:
+            question = "Describe this image."
+        
+        # 3. Query Input
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        # 4. Target Input (Winner)
+        win_text = f"task: sentence similarity | query: {answer}"
+        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        # 5. Dummy Loser 
+        # VQA doesn't have losers, so we pass the winner twice. 
+        # The masking logic in train_alignment.py ignores the loser for VQA batches.
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            
+            "win_ids": win_tok.input_ids.squeeze(0),
+            "win_mask": win_tok.attention_mask.squeeze(0),
+            
+            "lose_ids": win_tok.input_ids.squeeze(0), 
+            "lose_mask": win_tok.attention_mask.squeeze(0) 
+        }

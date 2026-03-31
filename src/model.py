@@ -80,7 +80,7 @@ class VL_JEPA(nn.Module):
 
     def forward_predictor(self, video_pixel_values, query_ids):
         # for eval only, not for training on datacomp
-        # video_pixel_values = video_pixel_values.permute(0, 2, 1, 3, 4) 
+        video_pixel_values = video_pixel_values.permute(0, 2, 1, 3, 4) 
         
         # X-Encoder
         with torch.no_grad():
