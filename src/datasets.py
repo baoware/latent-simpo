@@ -327,7 +327,7 @@ class MMSafetyDataset(BaseJEPADataset):
         
         # default to the most relevant physical-world categories for VL-JEPA
         if subsets is None:
-            subsets =['Illegal_Activitiy', 'Physical_Harm', 'Health_Consultation']
+            subsets =['Illegal_Activitiy', 'Physical_Harm', 'Health_Consultation', 'Sex', 'HateSpeech']
             
         print(f"Initializing MM-SafetyBench Dataset (Categories: {subsets})...")
         
@@ -540,3 +540,255 @@ class VQADataset(BaseJEPADataset):
             "lose_ids": win_tok.input_ids.squeeze(0), 
             "lose_mask": win_tok.attention_mask.squeeze(0) 
         }
+    
+class DenseCOCODataset(BaseJEPADataset):
+    """
+    Creates a Dense Captioning dataset using your local COCO files by 
+    concatenating all available captions for an image into a single dense paragraph.
+    """
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        import os
+        from torchvision.datasets import CocoCaptions
+        
+        root_dir = os.path.join(config.data_dir, "coco")
+        
+        if split == 'train':
+            img_path = os.path.join(root_dir, "train2014")
+            ann_path = os.path.join(root_dir, "annotations/captions_train2014.json")
+        else:
+            # We map 'val' or 'test' requests to the val split
+            img_path = os.path.join(root_dir, "val2014")
+            ann_path = os.path.join(root_dir, "annotations/captions_val2014.json")
+            
+        print(f"Loading Dense COCO (Local) from {img_path}...")
+        self.coco = CocoCaptions(root=img_path, annFile=ann_path)
+
+    def __len__(self):
+        return len(self.coco)
+
+    def __getitem__(self, idx):
+        import random
+        image, captions = self.coco[idx]
+        video = self.prepare_video(image)
+        
+        # 1. Ask for a dense description
+        q_tok = self.prepare_text("Provide a highly detailed, dense description of this image:", self.predictor_tokenizer, 16)
+        
+        # 2. Combine all 5 captions into one massive, dense paragraph
+        dense_caption = " ".join(captions).strip()
+        formatted_caption = f"task: sentence similarity | query: {dense_caption}"
+        
+        # Use max_seq_len (512) to ensure the whole paragraph fits!
+        t_tok = self.prepare_text(formatted_caption, self.y_encoder_tokenizer, self.config.max_seq_len)
+        
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+            "win_ids": t_tok.input_ids.squeeze(0),
+            "win_mask": t_tok.attention_mask.squeeze(0),
+            "lose_ids": t_tok.input_ids.squeeze(0),
+            "lose_mask": t_tok.attention_mask.squeeze(0)
+        }
+
+
+class AOKVQADataset(BaseJEPADataset):
+    """
+    Augmented Outside Knowledge VQA. Requires deep reasoning on normal images.
+    Supports both 'train' and 'validation' splits.
+    """
+    def __init__(self, config, split='train', max_samples=2000):
+        super().__init__(config)
+        print(f"Loading A-OKVQA Dataset ({split})...")
+        
+        # Map 'test' to 'validation' since HF often hides answers in the actual 'test' split
+        actual_split = 'validation' if split == 'test' else split
+        self.dataset = load_dataset("HuggingFaceM4/A-OKVQA", split=actual_split)
+        
+        if actual_split == 'validation' and len(self.dataset) > max_samples:
+            self.dataset = self.dataset.select(range(max_samples))
+            
+        # If testing, extract candidate answers
+        self.is_test = (split in['test', 'val', 'validation'])
+        if self.is_test:
+            self.unique_answers =[]
+            for item in self.dataset:
+                ans = item.get('direct_answers', [''])
+                ans_str = str(ans[0]).strip() if isinstance(ans, list) and len(ans) > 0 else str(ans).strip()
+                if ans_str:
+                    self.unique_answers.append(ans_str)
+            self.unique_answers = list(set(self.unique_answers))
+            print(f"Extracted {len(self.unique_answers)} unique candidate answers for A-OKVQA.")
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        
+        try:
+            image = item['image']
+            video = self.prepare_video(image)
+        except Exception:
+            from PIL import Image
+            image = Image.new('RGB', (224, 224), (0, 0, 0))
+            video = self.prepare_video(image)
+            
+        question = item.get('question', 'Describe this image.')
+        
+        # A-OKVQA has a list of 'direct_answers'. We pick the first one.
+        answers = item.get('direct_answers', [''])
+        answer = answers[0] if len(answers) > 0 else ""
+            
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        if self.is_test:
+            # Return string for evaluation script to map against candidate embeddings
+            return {
+                "video": video,
+                "q_ids": q_tok.input_ids.squeeze(0),
+                "answer_str": str(answer).strip()
+            }
+        else:
+            win_text = f"task: sentence similarity | query: {answer}"
+            win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+            
+            return {
+                "video": video,
+                "q_ids": q_tok.input_ids.squeeze(0),
+                "win_ids": win_tok.input_ids.squeeze(0),
+                "win_mask": win_tok.attention_mask.squeeze(0),
+                "lose_ids": win_tok.input_ids.squeeze(0),
+                "lose_mask": win_tok.attention_mask.squeeze(0)
+            }
+
+
+class ChartQADataset(BaseJEPADataset):
+    def __init__(self, config, split='train', max_samples=2000):
+        super().__init__(config)
+        print(f"Loading ChartQA Dataset ({split})...")
+        
+        actual_split = 'val' if split in ['validation', 'test'] else split
+        self.dataset = load_dataset("lmms-lab/ChartQA", split=actual_split)
+        
+        if actual_split == 'val' and len(self.dataset) > max_samples:
+            self.dataset = self.dataset.select(range(max_samples))
+            
+        self.is_test = (split in['test', 'val', 'validation'])
+        
+        if self.is_test:
+            self.unique_answers =[]
+            for item in self.dataset:
+                ans = item.get('answer', '')
+                if not ans and 'conversations' in item:
+                    ans = item['conversations'][1]['value'] if len(item['conversations']) > 1 else ''
+                if ans:
+                    self.unique_answers.append(str(ans).strip())
+            self.unique_answers = list(set(self.unique_answers))
+            if len(self.unique_answers) == 0:
+                raise ValueError("No answers found in the dataset! Check the split.")
+            print(f"Extracted {len(self.unique_answers)} unique candidate answers for ChartQA.")
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        try:
+            video = self.prepare_video(item['image'])
+        except Exception:
+            from PIL import Image
+            video = self.prepare_video(Image.new('RGB', (224, 224), (0, 0, 0)))
+            
+        question = item.get('question', '')
+        answer = item.get('answer', '')
+        
+        # Handle different formatting
+        if 'conversations' in item and not question:
+            question = item['conversations'][0]['value'].replace('<image>\n', '').strip()
+            answer = item['conversations'][1]['value'].strip()
+            
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        if self.is_test:
+            return {
+                "video": video,
+                "q_ids": q_tok.input_ids.squeeze(0),
+                "answer_str": str(answer).strip()
+            }
+        else:
+            win_text = f"task: sentence similarity | query: {answer}"
+            win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+            
+            return {
+                "video": video,
+                "q_ids": q_tok.input_ids.squeeze(0),
+                "win_ids": win_tok.input_ids.squeeze(0),
+                "win_mask": win_tok.attention_mask.squeeze(0),
+                "lose_ids": win_tok.input_ids.squeeze(0),
+                "lose_mask": win_tok.attention_mask.squeeze(0)
+            }
+
+
+class DocVQADataset(BaseJEPADataset):
+    def __init__(self, config, split='train', max_samples=2000):
+        super().__init__(config)
+        print(f"Loading DocVQA Dataset ({split})...")
+        
+        actual_split = 'validation' if split == 'test' else split
+        self.dataset = load_dataset("HuggingFaceM4/DocVQA", split=actual_split)
+        
+        if actual_split == 'validation' and len(self.dataset) > max_samples:
+            self.dataset = self.dataset.select(range(max_samples))
+            
+        self.is_test = (split in['test', 'val', 'validation'])
+        
+        if self.is_test:
+            self.unique_answers = []
+            for item in self.dataset:
+                answers = item.get('answers',[''])
+                ans_str = answers[0] if isinstance(answers, list) and len(answers) > 0 else str(answers)
+                if ans_str:
+                    self.unique_answers.append(str(ans_str).strip())
+            self.unique_answers = list(set(self.unique_answers))
+            print(f"Extracted {len(self.unique_answers)} unique candidate answers for DocVQA.")
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        try:
+            video = self.prepare_video(item['image'])
+        except Exception:
+            from PIL import Image
+            video = self.prepare_video(Image.new('RGB', (224, 224), (0, 0, 0)))
+            
+        question = item.get('question', 'What does this document say?')
+        
+        answers = item.get('answers',[''])
+        answer = answers[0] if isinstance(answers, list) and len(answers) > 0 else str(answers)
+            
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        
+        if self.is_test:
+            return {
+                "video": video,
+                "q_ids": q_tok.input_ids.squeeze(0),
+                "answer_str": str(answer).strip()
+            }
+        else:
+            win_text = f"task: sentence similarity | query: {answer}"
+            win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+            
+            return {
+                "video": video,
+                "q_ids": q_tok.input_ids.squeeze(0),
+                "win_ids": win_tok.input_ids.squeeze(0),
+                "win_mask": win_tok.attention_mask.squeeze(0),
+                "lose_ids": win_tok.input_ids.squeeze(0),
+                "lose_mask": win_tok.attention_mask.squeeze(0)
+            }

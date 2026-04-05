@@ -104,3 +104,9 @@ def triplet_margin_loss(pred_emb, win_emb, lose_emb, margin=0.2):
     loss = F.relu(sim_lose - sim_win + margin)
     
     return loss.mean()
+
+
+def anchor_loss(pred_emb, ref_emb):
+    pred_norm = torch.nn.functional.normalize(pred_emb, p=2, dim=-1)
+    ref_norm = torch.nn.functional.normalize(ref_emb, p=2, dim=-1)
+    return (1.0 - torch.sum(pred_norm * ref_norm, dim=-1)).mean()
