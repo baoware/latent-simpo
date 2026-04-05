@@ -48,7 +48,6 @@ class Config:
     lr_y_encoder: float = 5e-6  # 1e-4 * 0.05
     
     temperature: float = 0.07   # InfoNCE temperature
-    
 
     # alignment hyperparams
     max_seq_len_aligment: int = 512  
@@ -56,6 +55,7 @@ class Config:
     epochs_alignment: int = 3
     lr_alignment: float = 5e-5
     lr_y_encoder_alignment: float = 2.5e-6  # (1e-5 * 0.05)
+    alpha_anchor: float = 0.1
     
     # latent-simpo and triplet loss hyperparams
     beta: float = 10.0          # reward scale
