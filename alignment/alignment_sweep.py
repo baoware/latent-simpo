@@ -43,7 +43,7 @@ mkdir -p logs/evals
 
 echo "Running Sweep: {exp_name}"
 
-python comp_alignment.py \\
+python -m alignment.comp_alignment \\
     --loss_type {loss} \\
     --load_from {base_checkpoint} \\
     --save_name {save_name} \\
@@ -51,7 +51,7 @@ python comp_alignment.py \\
     --gamma {gamma} \\
     --lambda_reg {lam}
 
-python eval_safety.py --ckpt {save_name} --task all > logs/evals/{exp_name}_eval.txt
+python -m alignment.eval_safety --ckpt {save_name} --task all > logs/evals/{exp_name}_eval.txt
 
 echo "Done"
 """

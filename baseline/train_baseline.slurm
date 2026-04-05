@@ -22,7 +22,7 @@ echo "Checking and installing requirements..."
 pip install --quiet -r requirements.txt
 
 echo "Starting Training..."
-accelerate launch --multi_gpu --num_processes=2 train_baseline.py
+accelerate launch --multi_gpu --num_processes=2 -m baseline.train_baseline
 echo "----------"
 
 echo "Job finished at $(date)"
