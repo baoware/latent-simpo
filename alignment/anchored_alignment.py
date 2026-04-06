@@ -186,7 +186,7 @@ def main():
             lose_mask = batch['lose_mask'].to(accelerator.device)
 
             _model = model.module if accelerator.num_processes > 1 else model
-            _ref_model = ref_model.module if accelerator.num_processes > 1 else ref_model
+            _ref_model = ref_model
                 
             # Predictor forward
             pred_emb = _model.forward_predictor(video, q_ids)
