@@ -8,7 +8,6 @@ from accelerate import Accelerator
 
 from src.config import Config
 from src.model import VL_JEPA
-from src.datasets import COCODataset
 from src.losses import infonce_loss
 from src.datasets import COCODataset, DataCompDataset
 
@@ -17,7 +16,8 @@ import huggingface_hub
 
 load_dotenv() 
 token = os.getenv("HF_TOKEN")
-huggingface_hub.login(token=token)
+if token:
+    huggingface_hub.login(token=token)
 
 def main():
     accelerator = Accelerator(mixed_precision="bf16")

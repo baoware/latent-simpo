@@ -24,6 +24,30 @@ token = os.getenv("HF_TOKEN")
 if token:
     huggingface_hub.login(token=token)
 
+def alignment_collate(batch):
+    out = {}
+
+    keys = [
+        "video",
+        "q_ids",
+        "win_ids",
+        "win_mask",
+        "lose_ids",
+        "lose_mask"
+    ]
+
+    for k in keys:
+        vals = []
+        for b in batch:
+            if k in b:
+                vals.append(b[k])
+            else:
+                # create dummy if missing
+                vals.append(torch.zeros_like(batch[0][k]))
+
+        out[k] = torch.stack(vals)
+
+    return out
 
 def main():
     parser = argparse.ArgumentParser()
@@ -47,7 +71,7 @@ def main():
     accelerator = Accelerator(mixed_precision="bf16")
     if accelerator.is_main_process:
         print(f"Comprehensive Alignment | Loss: {args.loss_type.upper()} | GPUs: {accelerator.num_processes}")
-        print(f"Beta: {cfg.beta} | Gamma: {cfg.gamma} | Lambda: {cfg.lambda_reg}, Anchor: {cfg.alpha_anchor}")
+        print(f"Beta: {cfg.beta} | Gamma: {cfg.gamma} | Lambda: {cfg.lambda_reg} | Anchor: {cfg.alpha_anchor}")
         print("----------")
         if not os.path.exists(cfg.output_dir): os.makedirs(cfg.output_dir)
 
@@ -70,6 +94,7 @@ def main():
         print("----------")
     ref_model = VL_JEPA(cfg)
     ref_model.load_state_dict(state_dict)
+    ref_model.to(accelerator.device)
     ref_model.eval()
     for p in ref_model.parameters(): p.requires_grad = False
     
@@ -83,9 +108,6 @@ def main():
     # load combined rlhf dataset
     print("Loading Datasets...")
     print("----------")
-    dataset_rlhf = RLHFDataset(cfg, split='train')       
-    dataset_safe = SafeVLDataset(cfg, split='train')    
-    dataset_vqa = VQADataset(cfg, split='train')  
     dataset_rlhf = RLHFDataset(cfg, split='train')
     dataset_safe = SafeVLDataset(cfg, split='train')
     dataset_vqa = VQADataset(cfg, split='train')
@@ -108,9 +130,11 @@ def main():
 
     weights = (
         [0.25 / len_rlhf] * len_rlhf +
-        [0.25 / len_safe] * len_safe +[0.10 / len_vqa] * len_vqa +
+        [0.25 / len_safe] * len_safe +
+        [0.10 / len_vqa] * len_vqa +
         [0.10 / len_dense] * len_dense +
-        [0.10 / len_aok] * len_aok +[0.10 / len_chart] * len_chart +
+        [0.10 / len_aok] * len_aok +
+        [0.10 / len_chart] * len_chart +
         [0.10 / len_doc] * len_doc
     )
 
@@ -124,9 +148,10 @@ def main():
         combined_dataset,
         batch_size=cfg.batch_size_alignment,
         sampler=sampler,
-        num_workers=4,
+        num_workers=1,
         pin_memory=True,
-        drop_last=True
+        drop_last=True,
+        collate_fn=alignment_collate
     )
     
     total_steps = len(dataloader) // accelerator.num_processes
@@ -141,8 +166,8 @@ def main():
     )
 
     # prepare accelerate
-    model, ref_model, optimizer, dataloader, lr_scheduler = accelerator.prepare(
-        model, ref_model, optimizer, dataloader, lr_scheduler
+    model, optimizer, dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, dataloader, lr_scheduler
     )
 
     model.train()
@@ -151,14 +176,14 @@ def main():
         progress = tqdm(dataloader, total=total_steps, desc=f"Epoch {epoch+1}/{cfg.epochs_alignment}", disable=not accelerator.is_main_process)
         
         for batch_index, batch in enumerate(progress):
+            optimizer.zero_grad()
+
             video = batch['video'].to(accelerator.device)
             q_ids = batch['q_ids'].to(accelerator.device)
             win_ids = batch['win_ids'].to(accelerator.device)
             win_mask = batch['win_mask'].to(accelerator.device)
             lose_ids = batch['lose_ids'].to(accelerator.device)
             lose_mask = batch['lose_mask'].to(accelerator.device)
-            
-            optimizer.zero_grad()
 
             _model = model.module if accelerator.num_processes > 1 else model
             _ref_model = ref_model.module if accelerator.num_processes > 1 else ref_model
@@ -174,7 +199,7 @@ def main():
                 ref_emb = _ref_model.forward_predictor(video, q_ids)
             
             # implicit masking for unified loss routing
-            has_pref = (win_ids != lose_ids).any(dim=-1).float().mean()
+            has_pref = (win_ids != lose_ids).any(dim=-1).float()
             
             # infonce regularizer
             all_pred = accelerator.gather(pred_emb)
@@ -182,19 +207,21 @@ def main():
             loss_nce = infonce_loss(all_pred, all_win, temperature=cfg.temperature)
 
             # anchor loss
-            loss_anc = anchor_loss(pred_emb, ref_emb)
+            loss_anc = anchor_loss(pred_emb, ref_emb).mean()
 
             # composite loss selection
             if args.loss_type == "infonce":
                 loss = loss_nce + (cfg.alpha_anchor * loss_anc)
                 
             elif args.loss_type == "triplet-margin":
-                loss_pref = triplet_margin_loss(pred_emb, win_emb, lose_emb, margin=cfg.gamma)
-                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref) + (cfg.alpha_anchor * loss_anc)
+                loss_pref = triple_margin_loss(pred_emb, win_emb, lose_emb, margin=cfg.gamma)
+                loss_pref_masked = (has_pref * loss_pref).mean()
+                loss = (cfg.lambda_reg * loss_nce) + loss_pref_masked + (cfg.alpha_anchor * loss_anc)
                 
             elif args.loss_type == "latent-simpo":
                 loss_pref = latent_simpo_loss(pred_emb, win_emb, lose_emb, beta=cfg.beta, gamma=cfg.gamma)
-                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref) + (cfg.alpha_anchor * loss_anc)
+                loss_pref_masked = (has_pref * loss_pref).mean()
+                loss = (cfg.lambda_reg * loss_nce) + loss_pref_masked + (cfg.alpha_anchor * loss_anc)
 
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(model.parameters(), 1.0)

@@ -63,4 +63,5 @@ echo "Done"
                 
                 print(f"Submitting {exp_name}...")
                 print("----------")
-                subprocess.run(["sbatch", script_path])
+                subprocess.run(["sbatch", script_path], check=True)
+                

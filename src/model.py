@@ -33,9 +33,9 @@ class VL_JEPA(nn.Module):
         
         # load full model logic
         self.predictor_model = AutoModel.from_pretrained(
-            config.predictor_source, 
+            config.predictor_source,
             trust_remote_code=True,
-            dtype=torch.bfloat16
+            torch_dtype=torch.bfloat16
         )
 
         self.predictor_model.gradient_checkpointing_enable()
@@ -70,7 +70,7 @@ class VL_JEPA(nn.Module):
 
         self.y_encoder = AutoModel.from_pretrained(
             config.y_encoder_source,
-            dtype=torch.bfloat16,
+            torch_dtype=torch.bfloat16,
             trust_remote_code=True
         )
 
@@ -79,9 +79,6 @@ class VL_JEPA(nn.Module):
         self.y_proj = nn.Linear(y_dim, config.target_dim)
 
     def forward_predictor(self, video_pixel_values, query_ids):
-        # for eval only, not for training on datacomp
-        video_pixel_values = video_pixel_values.permute(0, 2, 1, 3, 4) 
-        
         # X-Encoder
         with torch.no_grad():
             # video_pixel_values is [B, T, C, H, W]

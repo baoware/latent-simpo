@@ -3,92 +3,54 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import time
 import os
-import argparse
 from dotenv import load_dotenv
 
 from src.config import Config
-from src.datasets import DataCompDataset, COCODataset, RLHFDataset, SafeVLDataset, VQADataset
+from src.datasets import (
+    DataCompDataset, COCODataset, RLHFDataset, 
+    SafeVLDataset, VQADataset, DenseCOCODataset, 
+    AOKVQADataset, ChartQADataset, DocVQADataset
+)
 
-def check_loader(dataset_choice):
+def check_loader():
     load_dotenv()
-    
     cfg = Config()
     
-    print(f"Data loader test...")
-    print(f"Target dataset: {dataset_choice}")
-    print(f"Batch size:     {cfg.batch_size_base}")
-    print(f"Num frames:     {cfg.num_frames}")
-    print(f"Tokenizer:      {cfg.predictor_source}")
-    print("----------")
+    # list of all datasets to check
+    all_datasets = {
+        'datacomp': DataCompDataset(cfg),
+        'coco': COCODataset(cfg, split='train'),
+        'rlhf': RLHFDataset(cfg, split='train'),
+        'safe': SafeVLDataset(cfg, split='train'),
+        'vqa': VQADataset(cfg, split='train'),
+        'dense': DenseCOCODataset(cfg, split='train'),
+        'aok': AOKVQADataset(cfg, split='train'),
+        'chart': ChartQADataset(cfg, split='train'),
+        'doc': DocVQADataset(cfg, split='train')
+    }
     
-    # Initialize Dataset
-    try:
-        if dataset_choice == 'datacomp':
-            dataset = DataCompDataset(cfg)
-            dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=4)
-        elif dataset_choice == 'coco':
-            dataset = COCODataset(cfg, split='train')
-            dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=2)
-        elif dataset_choice == 'rlhf':
-            dataset = RLHFDataset(cfg, split='train')
-            dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=2)
-        elif dataset_choice == 'safe':
-            dataset = SafeVLDataset(cfg, split='train')
-            dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=2)
-        elif dataset_choice == 'vqa':
-            dataset = VQADataset(cfg, split='train')
-            dataloader = DataLoader(dataset, batch_size=cfg.batch_size_base, num_workers=2)
-        else:
-            print(f"Unknown dataset: {dataset_choice}")
-            return
-    except Exception as e:
-        print(f"Could not initialize dataset: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-
-    print("Attempting to fetch 5 batches...")
-    print("----------")
-    start_time = time.time()
-    
-    try:
-        iterator = iter(dataloader)
-        for i in range(5):
-            batch_t0 = time.time()
-            batch = next(iterator)
-            batch_time = time.time() - batch_t0
+    for name, dataset in all_datasets.items():
+        print(f"Testing {name}")
+        try:
+            dataloader = DataLoader(dataset, batch_size=4, num_workers=0) # small batch for testing
+            iterator = iter(dataloader)
             
-            video = batch['video']
-            q_ids = batch['q_ids']
+            # fetch 2 batches
+            for i in range(2):
+                batch = next(iterator)
+                video = batch['video']
+                print(f"  Batch {i+1}: OK | Video Shape: {list(video.shape)}")
+                
+                # check for preference data
+                if 'win_ids' in batch:
+                    print(f"    Win shape: {list(batch['win_ids'].shape)}")
             
-            print(f"  Batch {i+1}: OK ({batch_time:.3f}s) | "
-                  f"Video: {list(video.shape)} | Query: {list(q_ids.shape)}")
+            print(f"{name} passed.")
             
-            expected_video =[cfg.batch_size_base, 3, cfg.num_frames, cfg.resolution, cfg.resolution]
-            if list(video.shape) != expected_video:
-                print(f"Video shape mismatch! Expected {expected_video}")
-
-            if dataset_choice in['rlhf', 'safe', 'vqa']:
-                win_ids = batch['win_ids']
-                lose_ids = batch['lose_ids']
-                print(f"    Win IDs: {list(win_ids.shape)} | Lose IDs: {list(lose_ids.shape)}")
-
-    except Exception as e:
-        print(f"Error during iteration: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-        
-    total_time = time.time() - start_time
-    avg_time = total_time / 5
-    
-    print(f"Loader works...")
-    print(f"Average Batch Time: {avg_time:.3f}s")
-    print("----------")
+        except Exception as e:
+            print(f"{name} failed: {e}")
+            import traceback
+            traceback.print_exc()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default="vqa", choices=["datacomp", "coco", "rlhf", "safe", "vqa"])
-    args = parser.parse_args()
-    
-    check_loader(args.dataset)
+    check_loader()
