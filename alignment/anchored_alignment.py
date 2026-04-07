@@ -214,7 +214,7 @@ def main():
                 loss = loss_nce + (cfg.alpha_anchor * loss_anc)
                 
             elif args.loss_type == "triplet-margin":
-                loss_pref = triple_margin_loss(pred_emb, win_emb, lose_emb, margin=cfg.gamma)
+                loss_pref = triplet_margin_loss(pred_emb, win_emb, lose_emb, margin=cfg.gamma)
                 loss_pref_masked = (has_pref * loss_pref).mean()
                 loss = (cfg.lambda_reg * loss_nce) + loss_pref_masked + (cfg.alpha_anchor * loss_anc)
                 

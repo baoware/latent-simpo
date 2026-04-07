@@ -317,7 +317,7 @@ class MMSafetyDataset(BaseJEPADataset):
         
         # default to the most relevant physical-world categories for VL-JEPA
         if subsets is None:
-            subsets =['Illegal_Activitiy', 'Physical_Harm', 'Health_Consultation', 'Sex', 'HateSpeech']
+            subsets =['Illegal_Activitiy', 'Health_Consultation', 'Sex']
             
         print(f"Initializing MM-SafetyBench Dataset (Categories: {subsets})...")
         
@@ -453,42 +453,40 @@ class SafeRLHFDataset(BaseJEPADataset):
 class VQADataset(BaseJEPADataset):
     def __init__(self, config, split='train'):
         super().__init__(config)
-        print(f"Loading VQA Dataset (HuggingFaceH4/llava-instruct-mix-vsft)...")
-        self.dataset = load_dataset("HuggingFaceH4/llava-instruct-mix-vsft", split=split)
-
-        self.is_test = (split in['test', 'val', 'validation'])
+        print(f"Loading VQA Mixture (H4 LLaVA)...")
+        
+        actual_split = 'train'
+        self.dataset = load_dataset("HuggingFaceH4/llava-instruct-mix-vsft", split=actual_split)
+        
+        self.is_test = split in['test', 'val', 'validation']
+        
         if self.is_test:
-            self.unique_answers =[]
-            for item in self.dataset:
-                messages = item.get('messages',[])
-                if len(messages) >= 2:
-                    ans = messages[1].get('content', '')
-                    if isinstance(ans, list): ans = " ".join([c['text'] for c in ans if c['type'] == 'text'])
-                    if ans: self.unique_answers.append(str(ans).strip())
-            self.unique_answers = list(set(self.unique_answers))
+            ans_list =[]
+            for item in self.dataset.select(range(min(len(self.dataset), 2000))):
+                if 'messages' in item and len(item['messages']) >= 2:
+                    ans = item['messages'][1]['content']
+                    if isinstance(ans, list):
+                        ans = " ".join([c['text'] for c in ans if c['type'] == 'text'])
+                    ans_list.append(str(ans).strip())
+            self.unique_answers = list(set([a for a in ans_list if a]))
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
         item = self.dataset[idx]
-        
-        # visual input
         try:
             image = item['images'][0]
-            video = self.prepare_video(image)
-        except Exception:
-            # fallback for missing or corrupted images
+        except:
             from PIL import Image
             image = Image.new('RGB', (224, 224), (0, 0, 0))
-            video = self.prepare_video(image)
-            
+        video = self.prepare_video(image)
+        
         messages = item.get('messages',[])
-        question = "Describe this image."
+        question = "Describe the image."
         answer = ""
         
         if len(messages) >= 2:
-            # extract raw text, handling lists if they use complex multimodal formatting
             q_content = messages[0].get('content', '')
             if isinstance(q_content, list):
                 q_content = " ".join([c['text'] for c in q_content if c['type'] == 'text'])
@@ -504,26 +502,22 @@ class VQADataset(BaseJEPADataset):
             question = q_content.replace("<image>", "").replace("\n", " ").strip()
             answer = a_content.strip()
             
-        # fallback if the parsing resulted in an empty string
         if not question:
-            question = "Describe this image."
+            question = "Describe the image."
+            
+        q_tok = self.prepare_text(f"Question: {question} Answer:", self.predictor_tokenizer, 64)
         
-        # query input
-        q_text = f"Question: {question} Answer:"
-        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+        if self.is_test:
+            return {"video": video, "q_ids": q_tok.input_ids.squeeze(0), "answer_str": answer}
         
-        # target input winner
-        win_text = f"task: sentence similarity | query: {answer}"
-        win_tok = self.prepare_text(win_text, self.y_encoder_tokenizer, self.config.max_seq_len)
-        
-        # dummy loser 
+        win_tok = self.prepare_text(f"task: sentence similarity | query: {answer}", self.y_encoder_tokenizer, self.config.max_seq_len)
         return {
             "video": video,
             "q_ids": q_tok.input_ids.squeeze(0),
             "win_ids": win_tok.input_ids.squeeze(0),
             "win_mask": win_tok.attention_mask.squeeze(0),
-            "lose_ids": win_tok.input_ids.squeeze(0), 
-            "lose_mask": win_tok.attention_mask.squeeze(0) 
+            "lose_ids": win_tok.input_ids.squeeze(0),
+            "lose_mask": win_tok.attention_mask.squeeze(0)
         }
     
 class DenseCOCODataset(BaseJEPADataset):

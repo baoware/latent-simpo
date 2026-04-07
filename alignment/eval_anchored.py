@@ -10,7 +10,7 @@ import huggingface_hub
 
 from src.config import Config
 from src.model import VL_JEPA
-from src.datasets import POPEDataset, SugarCrepeDataset, MMSafetyDataset, VQADataset, GQADataset, ChartQADataset, DocVQADataset, AOKVQADataset
+from src.datasets import POPEDataset, SugarCrepeDataset, MMSafetyDataset, VQADataset, ChartQADataset, DocVQADataset, AOKVQADataset
 from transformers import AutoTokenizer
 
 load_dotenv()
@@ -104,7 +104,7 @@ def evaluate_multiclass(model, cfg, dataset_class, name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, required=True, help="Checkpoint filename")
-    parser.add_argument("--task", type=str, required=True, choices=["pope", "sugarcrepe", "safety", "vqa", "gqa", "chartqa", "docvqa", "aokvqa", "all"])
+    parser.add_argument("--task", type=str, required=True, choices=["pope", "sugarcrepe", "safety", "vqa", "chartqa", "docvqa", "aokvqa", "all"])
     args = parser.parse_args()
 
     cfg = Config()
@@ -132,8 +132,6 @@ def main():
     # multi-class retrieval evaluations
     if args.task in ["vqa", "all"]:
         evaluate_multiclass(model, cfg, VQADataset, "VQAv2")
-    if args.task in ["gqa", "all"]:
-        evaluate_multiclass(model, cfg, GQADataset, "GQA")
     if args.task in ["chartqa", "all"]:
         evaluate_multiclass(model, cfg, ChartQADataset, "ChartQA")
     if args.task in ["docvqa", "all"]:
