@@ -12,7 +12,10 @@ import huggingface_hub
 
 from src.config import Config
 from src.model import VL_JEPA
-from src.datasets import RLHFDataset, SafeRLHFDataset, VQADataset, SafeVLDataset
+from src.datasets import (
+    RLHFDataset, SafeVLDataset, VQADataset, 
+    DenseCOCODataset, AOKVQADataset, ChartQADataset, DocVQADataset
+)
 from src.losses import infonce_loss, latent_simpo_loss, triplet_margin_loss
 
 # Authenticate
@@ -20,6 +23,31 @@ load_dotenv()
 token = os.getenv("HF_TOKEN")
 if token:
     huggingface_hub.login(token=token)
+
+def alignment_collate(batch):
+    out = {}
+
+    keys =[
+        "video",
+        "q_ids",
+        "win_ids",
+        "win_mask",
+        "lose_ids",
+        "lose_mask"
+    ]
+
+    for k in keys:
+        vals =[]
+        for b in batch:
+            if k in b:
+                vals.append(b[k])
+            else:
+                # create dummy if missing
+                vals.append(torch.zeros_like(batch[0][k]))
+
+        out[k] = torch.stack(vals)
+
+    return out
 
 def main():
     parser = argparse.ArgumentParser()
@@ -70,26 +98,32 @@ def main():
         print("Loading RLHF-V (Images) and PKU-SafeRLHF (Safety) Datasets...")
         print("----------")
         
-    dataset_rlhf = RLHFDataset(cfg, split='train')       # ~83k
-    # dataset_safe = SafeRLHFDataset(cfg, split='train')   # ~260k
-    dataset_safe = SafeVLDataset(cfg, split='train')     # ~100k
-    dataset_vqa = VQADataset(cfg, split='train')         
+    dataset_rlhf = RLHFDataset(cfg, split='train')
+    dataset_safe = SafeVLDataset(cfg, split='train')
+    dataset_vqa = VQADataset(cfg, split='train')
+    dataset_dense = DenseCOCODataset(cfg, split='train')
+    dataset_aok = AOKVQADataset(cfg, split='train')
+    dataset_chart = ChartQADataset(cfg, split='train')
+    dataset_doc = DocVQADataset(cfg, split='train')   
 
-    combined_dataset = ConcatDataset([dataset_rlhf, dataset_safe, dataset_vqa])
+    combined_dataset = ConcatDataset([dataset_rlhf, dataset_safe, dataset_vqa, 
+                                      dataset_dense, dataset_aok, dataset_chart, dataset_doc])
 
-    # calculate weights to ensure balanced sampling across the three datasets
+    # balance weights: 50% alignment (RLHF/Safe), 50% semantic anchors
     len_rlhf = len(dataset_rlhf)
     len_safe = len(dataset_safe)
     len_vqa = len(dataset_vqa)
-
-    weight_rlhf = 1.0 / len_rlhf
-    weight_safe = 1.0 / len_safe  
-    weight_vqa = 1.0 / len_vqa
+    len_dense = len(dataset_dense)
+    len_aok = len(dataset_aok)
+    len_chart = len(dataset_chart)
+    len_doc = len(dataset_doc)
 
     weights = (
-        [weight_rlhf] * len_rlhf +
-        [weight_safe] * len_safe +
-        [weight_vqa] * len_vqa
+        [0.25 / len_rlhf] * len_rlhf +[0.25 / len_safe] * len_safe +
+        [0.10 / len_vqa] * len_vqa +
+        [0.10 / len_dense] * len_dense +
+        [0.10 / len_aok] * len_aok +[0.10 / len_chart] * len_chart +
+        [0.10 / len_doc] * len_doc
     )
 
     sampler = WeightedRandomSampler(
@@ -103,7 +137,9 @@ def main():
         batch_size=cfg.batch_size_alignment,
         sampler=sampler,
         num_workers=4,
-        pin_memory=True
+        pin_memory=True,
+        drop_last=True,
+        collate_fn=alignment_collate
     )
     
     total_steps = len(dataloader) // accelerator.num_processes
@@ -151,7 +187,7 @@ def main():
                 win_emb = model.forward_y_encoder(win_ids, win_mask)
                 lose_emb = model.forward_y_encoder(lose_ids, lose_mask)
 
-            has_pref = (win_ids != lose_ids).any(dim=-1).float().mean()
+            has_pref = (win_ids != lose_ids).any(dim=-1).float()
 
             all_pred = accelerator.gather(pred_emb)
             all_win = accelerator.gather(win_emb)
@@ -162,11 +198,11 @@ def main():
                 
             elif args.loss_type == "triplet-margin":
                 loss_pref = triplet_margin_loss(pred_emb, win_emb, lose_emb, margin=cfg.gamma)
-                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref)
+                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref).mean()
                 
             elif args.loss_type == "latent-simpo":
                 loss_pref = latent_simpo_loss(pred_emb, win_emb, lose_emb, beta=cfg.beta, gamma=cfg.gamma)
-                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref)
+                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref).mean()
 
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(model.parameters(), 1.0)

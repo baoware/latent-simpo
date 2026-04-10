@@ -122,7 +122,7 @@ def evaluate_safety(model, cfg):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, required=True, help="checkpoint filename in checkpoints/")
-    parser.add_argument("--task", type=str, required=True, choices=["pope", "sugarcrepe", "safety", "vqa", "all"], help="benchmark to run")
+    parser.add_argument("--task", type=str, required=True, choices=["pope", "sugarcrepe", "safety", "all"], help="benchmark to run")
     args = parser.parse_args()
 
     cfg = Config()

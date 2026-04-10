@@ -15,14 +15,14 @@ pip install --quiet -r requirements.txt
 accelerate launch --multi_gpu --num_processes=2 -m alignment.comp_alignment \
     --loss_type infonce \
     --load_from checkpoints/datacomp_baseline_epoch_1.pt \
-    --save_name rlhf_infonce_comprehensive.pt
+    --save_name infonce.pt
 
 accelerate launch --multi_gpu --num_processes=2 -m alignment.comp_alignment \
     --loss_type latent-simpo \
     --load_from checkpoints/datacomp_baseline_epoch_1.pt \
-    --save_name rlhf_latent_simpo_comprehensive.pt
+    --save_name latent_simpo.pt
 
 accelerate launch --multi_gpu --num_processes=2 -m alignment.comp_alignment \
     --loss_type triplet-margin \
     --load_from checkpoints/datacomp_baseline_epoch_1.pt \
-    --save_name rlhf_triplet_margin_comprehensive.pt  
+    --save_name triplet_margin.pt  
