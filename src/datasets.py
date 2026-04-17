@@ -461,8 +461,11 @@ class VQADataset(BaseJEPADataset):
         self.is_test = split in['test', 'val', 'validation']
         
         if self.is_test:
+            if len(self.dataset) > 2000:
+                self.dataset = self.dataset.select(range(2000))
+            
             ans_list =[]
-            for item in self.dataset.select(range(min(len(self.dataset), 2000))):
+            for item in self.dataset:
                 if 'messages' in item and len(item['messages']) >= 2:
                     ans = item['messages'][1]['content']
                     if isinstance(ans, list):

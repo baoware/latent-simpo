@@ -20,50 +20,54 @@ for loss in LOSS_TYPES:
             short_loss = "simpo" if loss == "latent-simpo" else "trip"
             exp_name = f"{short_loss}_g{gamma}_l{lam}"
             save_name = f"{exp_name}.pt"
-            
-            lines =[
-"#!/bin/bash",
-f"#SBATCH --job-name={exp_name}",
-"#SBATCH --partition=gpu",
-"#SBATCH --gres=gpu:a100:1",         
-"#SBATCH --nodes=1",
-"#SBATCH --cpus-per-task=8",         
-"#SBATCH --mem=80GB",                
-"#SBATCH --time=06:00:00",
-f"#SBATCH --output=logs/{exp_name}_%j.log",
-"#SBATCH --account=cs6770_sp26",     
-"",
-"cd /sfs/weka/scratch/rjr6zk/latent-simpo/",
-"source .venv/bin/activate",
-"",
-"mkdir -p logs/evals",
-"",
-f"echo \"Running Sweep: {exp_name}\"",
-"",
-# run the unified training script
-"python -m alignment.comp_alignment \\",
-f"    --loss_type {loss} \\",
-f"    --load_from {base_checkpoint} \\",
-f"    --save_name {save_name} \\",
-f"    --beta {BETA} \\",
-f"    --gamma {gamma} \\",
-f"    --lambda_reg {lam}",
-"",
-# run the evaluation automatically
-f"python -u eval_safety.py --ckpt {save_name} --task all > logs/evals/{exp_name}_eval.txt",
-"",
-"echo \"Done.\""
+
+            lines = [
+                "#!/bin/bash",
+                f"#SBATCH --job-name={exp_name}",
+                "#SBATCH --partition=gpu",
+                "#SBATCH --gres=gpu:a100:1",
+                "#SBATCH --nodes=1",
+                "#SBATCH --cpus-per-task=8",
+                "#SBATCH --mem=80GB",
+                "#SBATCH --time=06:00:00",
+                f"#SBATCH --output=logs/{exp_name}_%j.log",
+                "#SBATCH --account=cs6770_sp26",
+                "",
+                "cd /sfs/weka/scratch/rjr6zk/latent-simpo/",
+                "source .venv/bin/activate",
+                "pip install --quiet -r requirements.txt",
+                "",
+                "mkdir -p logs/evals",
+                "",
+                f"echo \"Running Sweep: {exp_name}\"",
+                "",
+                "# run the unified training script",
+                "python -u -m alignment.comp_alignment \\",
+                f"    --loss_type {loss} \\",
+                f"    --load_from {base_checkpoint} \\",
+                f"    --save_name {save_name} \\",
+                f"    --beta {BETA} \\",
+                f"    --gamma {gamma} \\",
+                f"    --lambda_reg {lam}",
+                "",
+                "# run the safety evaluation automatically",
+                f"python -u -m alignment.eval_safety --ckpt {save_name} --task all > logs/evals/{exp_name}_eval.txt",
+                "",
+                "# run the vqa evaluation and append (>>) to the same log file",
+                f"python -u -m alignment.eval_vqa --ckpt {save_name} --task vqa >> logs/evals/{exp_name}_eval.txt",
+                "",
+                "echo \"Done.\""
             ]
-            
+
             slurm_content = "\n".join(lines)
             script_path = f"slurm_scripts/{exp_name}.slurm"
-            
+
             with open(script_path, "w", newline='\n') as f:
                 f.write(slurm_content)
-            
+
             print(f"Submitting {exp_name}...")
+            print("----------")
             subprocess.run(["sbatch", script_path])
             job_count += 1
 
 print(f"Successfully submitted {job_count} jobs to SLURM!")
-                

@@ -109,7 +109,6 @@ def main():
     combined_dataset = ConcatDataset([dataset_rlhf, dataset_safe, dataset_vqa, 
                                       dataset_dense, dataset_aok, dataset_chart, dataset_doc])
 
-    # balance weights: 50% alignment (RLHF/Safe), 50% semantic anchors
     len_rlhf = len(dataset_rlhf)
     len_safe = len(dataset_safe)
     len_vqa = len(dataset_vqa)
@@ -118,13 +117,29 @@ def main():
     len_chart = len(dataset_chart)
     len_doc = len(dataset_doc)
 
+    # balance weights: 50% alignment (RLHF/Safe), 50% semantic anchors
     weights = (
-        [0.25 / len_rlhf] * len_rlhf +[0.25 / len_safe] * len_safe +
+        [0.25 / len_rlhf] * len_rlhf +
+        [0.25 / len_safe] * len_safe +
         [0.10 / len_vqa] * len_vqa +
         [0.10 / len_dense] * len_dense +
-        [0.10 / len_aok] * len_aok +[0.10 / len_chart] * len_chart +
+        [0.10 / len_aok] * len_aok +
+        [0.10 / len_chart] * len_chart +
         [0.10 / len_doc] * len_doc
     )
+
+    # balance weights: 20% alignment (RLHF/Safe), 80% semantic anchors
+    '''
+    weights = (
+        [0.10 / len_rlhf] * len_rlhf +
+        [0.10 / len_safe] * len_safe +
+        [0.22 / len_vqa] * len_vqa +
+        [0.16 / len_dense] * len_dense +
+        [0.16 / len_aok] * len_aok +
+        [0.13 / len_chart] * len_chart +
+        [0.13 / len_doc] * len_doc
+    )
+    '''
 
     sampler = WeightedRandomSampler(
         weights=weights,
@@ -187,22 +202,28 @@ def main():
                 win_emb = model.forward_y_encoder(win_ids, win_mask)
                 lose_emb = model.forward_y_encoder(lose_ids, lose_mask)
 
+            # has_pref: local batch — 1.0 where preference pairs differ, 0.0 for semantic-anchor pairs (win==lose)
             has_pref = (win_ids != lose_ids).any(dim=-1).float()
+
+            # Per-sample InfoNCE weight: cfg.lambda_reg for preference rows, 1.0 for anchor-only rows.
+            # loss_nce is a global scalar (gathered batch); scale by the global mean weight so all ranks agree.
+            dynamic_lambda = torch.where(has_pref > 0, cfg.lambda_reg, 1.0)
+            nce_scale = accelerator.gather_for_metrics(dynamic_lambda).mean()
 
             all_pred = accelerator.gather(pred_emb)
             all_win = accelerator.gather(win_emb)
             loss_nce = infonce_loss(all_pred, all_win, temperature=cfg.temperature)
 
             if args.loss_type == "infonce":
-                loss = loss_nce
-                
+                loss = nce_scale * loss_nce
+
             elif args.loss_type == "triplet-margin":
                 loss_pref = triplet_margin_loss(pred_emb, win_emb, lose_emb, margin=cfg.gamma)
-                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref).mean()
-                
+                loss = nce_scale * loss_nce + (has_pref * loss_pref).mean()
+
             elif args.loss_type == "latent-simpo":
                 loss_pref = latent_simpo_loss(pred_emb, win_emb, lose_emb, beta=cfg.beta, gamma=cfg.gamma)
-                loss = (cfg.lambda_reg * loss_nce) + (has_pref * loss_pref).mean()
+                loss = nce_scale * loss_nce + (has_pref * loss_pref).mean()
 
             accelerator.backward(loss)
             accelerator.clip_grad_norm_(model.parameters(), 1.0)
