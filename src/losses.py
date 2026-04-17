@@ -69,9 +69,7 @@ def latent_simpo_loss(pred_emb, win_emb, lose_emb, beta=10.0, gamma=0.2):
     margin = sim_win - sim_lose - gamma
     
     # log-sigmoid loss
-    loss = -F.logsigmoid(beta * margin)
-    
-    return loss.mean()
+    return -F.logsigmoid(beta * margin)
 
 """
     calculates the latent triplet margin loss (the metric learning baseline)
@@ -101,12 +99,10 @@ def triplet_margin_loss(pred_emb, win_emb, lose_emb, margin=0.2):
 
     # triplet hinge loss: max(0, sim_lose - sim_win + margin)
     # if win is greater than lose by margin, loss becomes 0
-    loss = F.relu(sim_lose - sim_win + margin)
-    
-    return loss.mean()
+    return F.relu(sim_lose - sim_win + margin)
 
 
 def anchor_loss(pred_emb, ref_emb):
     pred_norm = torch.nn.functional.normalize(pred_emb, p=2, dim=-1)
     ref_norm = torch.nn.functional.normalize(ref_emb, p=2, dim=-1)
-    return (1.0 - torch.sum(pred_norm * ref_norm, dim=-1)).mean()
+    return (1.0 - torch.sum(pred_norm * ref_norm, dim=-1))

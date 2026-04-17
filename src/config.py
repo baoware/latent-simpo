@@ -17,7 +17,7 @@ class Config:
     # predictor_source: str = "microsoft/Phi-4-mini-instruct"
     
     # Y-Encoder: EmbeddingGemma-300M
-    y_encoder_source = "google/embeddinggemma-300m"
+    y_encoder_source: str = "google/embeddinggemma-300m"
     
     # architecture dimensions from paper
     x_encoder_dim: int = 1024   # ViT-L output dimension
@@ -53,8 +53,8 @@ class Config:
     max_seq_len_aligment: int = 512  
     batch_size_alignment: int = 64
     epochs_alignment: int = 3
-    lr_alignment: float = 5e-5
-    lr_y_encoder_alignment: float = 2.5e-6  # (1e-5 * 0.05)
+    lr_alignment: float = 5e-6
+    lr_y_encoder_alignment: float = 2.5e-7  # (1e-6 * 0.05)
     alpha_anchor: float = 0.1
     
     # latent-simpo and triplet loss hyperparams
