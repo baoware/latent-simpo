@@ -101,31 +101,18 @@ def main():
     dataset_rlhf = RLHFDataset(cfg, split='train')
     dataset_safe = SafeVLDataset(cfg, split='train')
     dataset_vqa = VQADataset(cfg, split='train')
-    dataset_dense = DenseCOCODataset(cfg, split='train')
-    dataset_aok = AOKVQADataset(cfg, split='train')
-    dataset_chart = ChartQADataset(cfg, split='train')
-    dataset_doc = DocVQADataset(cfg, split='train')   
 
-    combined_dataset = ConcatDataset([dataset_rlhf, dataset_safe, dataset_vqa, 
-                                      dataset_dense, dataset_aok, dataset_chart, dataset_doc])
+    combined_dataset = ConcatDataset([dataset_rlhf, dataset_safe, dataset_vqa])
 
     len_rlhf = len(dataset_rlhf)
     len_safe = len(dataset_safe)
     len_vqa = len(dataset_vqa)
-    len_dense = len(dataset_dense)
-    len_aok = len(dataset_aok)
-    len_chart = len(dataset_chart)
-    len_doc = len(dataset_doc)
 
     # balance weights: 50% alignment (RLHF/Safe), 50% semantic anchors
     weights = (
         [0.25 / len_rlhf] * len_rlhf +
         [0.25 / len_safe] * len_safe +
-        [0.10 / len_vqa] * len_vqa +
-        [0.10 / len_dense] * len_dense +
-        [0.10 / len_aok] * len_aok +
-        [0.10 / len_chart] * len_chart +
-        [0.10 / len_doc] * len_doc
+        [0.50 / len_vqa] * len_vqa
     )
 
     # balance weights: 20% alignment (RLHF/Safe), 80% semantic anchors

@@ -29,7 +29,7 @@ for loss in LOSS_TYPES:
                 "#SBATCH --nodes=1",
                 "#SBATCH --cpus-per-task=8",
                 "#SBATCH --mem=80GB",
-                "#SBATCH --time=06:00:00",
+                "#SBATCH --time=08:00:00",
                 f"#SBATCH --output=logs/{exp_name}_%j.log",
                 "#SBATCH --account=cs6770_sp26",
                 "",
@@ -51,10 +51,10 @@ for loss in LOSS_TYPES:
                 f"    --lambda_reg {lam}",
                 "",
                 "# run the safety evaluation automatically",
-                f"python -u -m alignment.eval_safety --ckpt {save_name} --task all > logs/evals/{exp_name}_eval.txt",
+                f"python -u -m eval.eval_safety --ckpt {save_name} --task all > logs/evals/{exp_name}_eval.txt",
                 "",
                 "# run the vqa evaluation and append (>>) to the same log file",
-                f"python -u -m alignment.eval_vqa --ckpt {save_name} --task vqa >> logs/evals/{exp_name}_eval.txt",
+                f"python -u -m eval.eval_vqa --ckpt {save_name} --task vqa >> logs/evals/{exp_name}_eval.txt",
                 "",
                 "echo \"Done.\""
             ]
