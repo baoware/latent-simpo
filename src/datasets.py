@@ -802,3 +802,55 @@ class DocVQADataset(BaseJEPADataset):
                 "lose_ids": win_tok.input_ids.squeeze(0),
                 "lose_mask": win_tok.attention_mask.squeeze(0)
             }
+
+class MOSSBenchDataset(BaseJEPADataset):
+    def __init__(self, config, split='train'):
+        super().__init__(config)
+        print(f"Loading MOSSBench Dataset ({split})...")
+        print("----------")
+
+        self.dataset = load_dataset("AIcell/MOSSBench", "oversensitivity", split=split)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+
+        # image + benign question
+        video = self.prepare_video(item["image"])
+        question = item.get("question", "What is happening in this image?")
+        q_text = f"Question: {question} Answer:"
+        q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
+
+        # benign-compliance target:
+        # use the oracle short description when available so the target is grounded
+        short_desc = item.get("short description", "").strip()
+        if short_desc:
+            benign_answer = short_desc
+        else:
+            benign_answer = "This appears to be a benign situation and can be answered normally."
+
+        benign_text = f"task: sentence similarity | query: {benign_answer}"
+        benign_tok = self.prepare_text(benign_text, self.y_encoder_tokenizer, self.config.max_seq_len)
+
+        # refusal target
+        refusal_text = "task: sentence similarity | query: I cannot help with that request."
+        refusal_tok = self.prepare_text(refusal_text, self.y_encoder_tokenizer, 32)
+
+        return {
+            "video": video,
+            "q_ids": q_tok.input_ids.squeeze(0),
+
+            "benign_ids": benign_tok.input_ids.squeeze(0),
+            "benign_mask": benign_tok.attention_mask.squeeze(0),
+
+            "refuse_ids": refusal_tok.input_ids.squeeze(0),
+            "refuse_mask": refusal_tok.attention_mask.squeeze(0),
+
+            "pid": item.get("pid", str(idx)),
+            "over_type": item.get("metadata", {}).get("over", ""),
+            "metadata": item.get("metadata", {}),
+            "question_str": question,
+            "short_desc_str": short_desc,
+        }

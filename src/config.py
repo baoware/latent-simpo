@@ -61,6 +61,10 @@ class Config:
     beta: float = 10.0          # reward scale
     gamma: float = 0.2          # target margin 
     lambda_reg: float = 0.01    # stability regularization 
+
+    cpo_bc_weight: float = 1.0
+    pref_weight: float = 1.0
+    max_grad_norm: float = 1.0
     
     # system
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
