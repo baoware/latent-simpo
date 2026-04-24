@@ -4,7 +4,7 @@ import glob
 import random
 from torchvision.datasets import CocoCaptions
 from torch.utils.data import Dataset, IterableDataset
-from datasets import load_dataset, concatenate_datasets
+from datasets import load_dataset, concatenate_datasets, Image as HFImage
 from transformers import AutoTokenizer
 import torchvision.transforms as T
 import webdataset as wds
@@ -804,37 +804,61 @@ class DocVQADataset(BaseJEPADataset):
             }
 
 class MOSSBenchDataset(BaseJEPADataset):
-    def __init__(self, config, split='train'):
+    def __init__(self, config, split="train"):
         super().__init__(config)
         print(f"Loading MOSSBench Dataset ({split})...")
         print("----------")
 
         self.dataset = load_dataset("AIcell/MOSSBench", "oversensitivity", split=split)
+        self.dataset = self.dataset.cast_column("image", HFImage(decode=False))
 
     def __len__(self):
         return len(self.dataset)
 
+    def _load_moss_image(self, image_field):
+        """
+        image_field is usually a dict like:
+        {'path': '...', 'bytes': None}
+        when decode=False is used.
+        """
+        try:
+            if isinstance(image_field, dict):
+                path = image_field.get("path", None)
+                img_bytes = image_field.get("bytes", None)
+
+                if img_bytes is not None:
+                    from io import BytesIO
+                    return Image.open(BytesIO(img_bytes)).convert("RGB")
+
+                if path is not None and os.path.exists(path):
+                    return Image.open(path).convert("RGB")
+
+            elif isinstance(image_field, str) and os.path.exists(image_field):
+                return Image.open(image_field).convert("RGB")
+
+        except Exception as e:
+            print(f"MOSSBench manual image load failure: {e}")
+
+        # safe fallback
+        return Image.new("RGB", (self.config.resolution, self.config.resolution), (0, 0, 0))
+
     def __getitem__(self, idx):
         item = self.dataset[idx]
 
-        # image + benign question
-        video = self.prepare_video(item["image"])
+        image = self._load_moss_image(item["image"])
+        video = self.prepare_video(image)
+
         question = item.get("question", "What is happening in this image?")
         q_text = f"Question: {question} Answer:"
         q_tok = self.prepare_text(q_text, self.predictor_tokenizer, 64)
 
-        # benign-compliance target:
-        # use the oracle short description when available so the target is grounded
-        short_desc = item.get("short description", "").strip()
-        if short_desc:
-            benign_answer = short_desc
-        else:
-            benign_answer = "This appears to be a benign situation and can be answered normally."
+        short_desc = item.get("short description", "")
+        short_desc = short_desc.strip() if isinstance(short_desc, str) else ""
 
+        benign_answer = short_desc if short_desc else "This is a benign situation and can be answered normally."
         benign_text = f"task: sentence similarity | query: {benign_answer}"
         benign_tok = self.prepare_text(benign_text, self.y_encoder_tokenizer, self.config.max_seq_len)
 
-        # refusal target
         refusal_text = "task: sentence similarity | query: I cannot help with that request."
         refusal_tok = self.prepare_text(refusal_text, self.y_encoder_tokenizer, 32)
 
@@ -848,9 +872,7 @@ class MOSSBenchDataset(BaseJEPADataset):
             "refuse_ids": refusal_tok.input_ids.squeeze(0),
             "refuse_mask": refusal_tok.attention_mask.squeeze(0),
 
-            "pid": item.get("pid", str(idx)),
-            "over_type": item.get("metadata", {}).get("over", ""),
-            "metadata": item.get("metadata", {}),
+            "pid": item.get("pid", idx),
             "question_str": question,
             "short_desc_str": short_desc,
         }

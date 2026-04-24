@@ -82,6 +82,7 @@ def latent_simpo_loss(pred_emb, win_emb, lose_emb, beta=10.0, gamma=2.0, variant
     # calculate cosine similarities
     sim_win = torch.sum(pred_norm * win_norm, dim=-1)
     sim_lose = torch.sum(pred_norm * lose_norm, dim=-1)
+    delta = sim_win - sim_lose
     
     # log-sigmoid loss
     if variant == "paper":

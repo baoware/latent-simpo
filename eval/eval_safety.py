@@ -121,7 +121,7 @@ def evaluate_safety(model, cfg):
 
 def evaluate_mossbench(model, cfg):
     dataset = MOSSBenchDataset(cfg)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=1)
 
     benign_compliance = 0
     overrefusals = 0
